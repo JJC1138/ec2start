@@ -68,7 +68,16 @@ ttl = r53.list_resource_record_sets(
 		HostedZoneId=zone_id,StartRecordName=host_name,StartRecordType='A',MaxItems='1'
 	)['ResourceRecordSets'][0]['TTL']
 
-instance_ip = '10.0.0.1' # FIXME set this to the real instance IP
+print 'Starting instance'
+
+instance.start()
+
+while instance.state['Name'] != 'running':
+	print 'Waiting for instance to finish starting'
+	time.sleep(5)
+	instance.reload()
+
+instance_ip = instance.public_ip_address
 
 print 'Setting %s to point to %s with TTL %d' % (host_name, instance_ip, ttl)
 
@@ -93,6 +102,6 @@ response = r53.change_resource_record_sets(
 	})
 
 while response['ChangeInfo']['Status'] != 'INSYNC':
-	print 'Waiting for that to complete'
+	print 'Waiting for DNS update to propagate'
 	time.sleep(15)
 	response = r53.get_change(Id=response['ChangeInfo']['Id'])
