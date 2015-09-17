@@ -89,7 +89,7 @@ if zone_id is None:
 print 'Getting existing record\'s TTL'
 
 ttl = r53.list_resource_record_sets(
-		HostedZoneId=zone_id,StartRecordName=host_name,StartRecordType='A',MaxItems='1'
+		HostedZoneId=zone_id, StartRecordName=host_name, StartRecordType='A', MaxItems='1'
 	)['ResourceRecordSets'][0]['TTL']
 
 if instance_name:
