@@ -2,6 +2,7 @@
 
 import decimal
 import datetime
+import enum
 import sys
 import time
 
@@ -24,6 +25,18 @@ def main():
 
     ec2 = boto3.resource('ec2')
 
+    class Platform(enum.Enum):
+        linux = 'Linux'
+        windows = 'Windows'
+        @classmethod
+        def from_string(cls, string):
+            if not string:
+                return Platform.linux
+            elif string == 'windows':
+                return Platform.windows
+            else:
+                raise Exception('Unknown instance platform %s' % string)
+
     if instance_name:
         print('Getting instance')
 
@@ -35,6 +48,8 @@ def main():
 
         instance = instances[0]
 
+        platform = Platform.from_string(instance.platform)
+
         security_groups = instance.security_groups
 
         if len(security_groups) != 1:
@@ -45,6 +60,17 @@ def main():
         security_group = ec2.SecurityGroup(security_groups[0]['GroupId'])
 
     else:
+        print('Getting AMI')
+
+        images = list(ec2.images.filter(Filters=({'Name': 'tag:Name', 'Values': (ami_name_tag,)},)))
+
+        if len(images) != 1:
+            raise Exception('%d AMIs found' % len(images))
+
+        image = images[0]
+
+        platform = Platform.from_string(image.platform)
+
         print('Getting security group')
 
         security_groups = list(ec2.security_groups.filter(GroupNames=(security_group_name,)))
@@ -55,6 +81,8 @@ def main():
             raise Exception('%d security groups found' % len(security_groups))
 
         security_group = security_groups[0]
+
+    print('Detected platform: %s' % platform.value)
 
     if len(security_group.ip_permissions) > 0:
         print('Removing old permissions from security group')
@@ -67,7 +95,8 @@ def main():
 
     print('Authorizing connections from %s' % ip)
 
-    security_group.authorize_ingress(IpProtocol='tcp', FromPort=3389, ToPort=3389, CidrIp='%s/32' % ip)
+    port = 22 if platform == Platform.linux else 3389
+    security_group.authorize_ingress(IpProtocol='tcp', FromPort=port, ToPort=port, CidrIp='%s/32' % ip)
 
     r53 = boto3.client('route53')
 
@@ -89,9 +118,16 @@ def main():
 
     print('Getting existing record\'s TTL')
 
-    ttl = r53.list_resource_record_sets(
-            HostedZoneId=zone_id, StartRecordName=host_name, StartRecordType='A', MaxItems='1'
-        )['ResourceRecordSets'][0]['TTL']
+    ttl = 60 # default to use if the record doesn't exist
+
+    record_sets = r53.list_resource_record_sets(
+        HostedZoneId=zone_id, StartRecordName=host_name, StartRecordType='A', MaxItems='1'
+        )['ResourceRecordSets']
+    if len(record_sets) > 0:
+        record_set = record_sets[0]
+        # Because we're only using StartRecordName to filter, if the record doesn't exist then we might have some other record:
+        if record_set['Name'] == host_name:
+            ttl = record_set['TTL']
 
     if instance_name:
         print('Starting instance')
@@ -99,22 +135,13 @@ def main():
         instance.start()
 
     else:
-        print('Getting AMI')
-
-        images = list(ec2.images.filter(Filters=({'Name': 'tag:Name', 'Values': (ami_name_tag,)},)))
-
-        if len(images) != 1:
-            raise Exception('%d AMIs found' % len(images))
-
-        image = images[0]
-
         print('Getting current spot prices')
 
         ec2client = boto3.client('ec2')
 
         response = ec2client.describe_spot_price_history(
             InstanceTypes=(instance_type,),
-            ProductDescriptions=('Windows',),
+            ProductDescriptions=('Linux/UNIX' if platform == Platform.linux else 'Windows',),
             StartTime=datetime.datetime.utcnow())
 
         spot_prices = [decimal.Decimal(i['SpotPrice']) for i in response['SpotPriceHistory']]
