@@ -24,7 +24,7 @@ host_name = sys.argv[2]
 ec2 = boto3.resource('ec2')
 
 if instance_name:
-    print 'Getting instance'
+    print('Getting instance')
 
     instances = list(ec2.instances.filter(
         Filters=({'Name': 'tag:Name', 'Values': (instance_name,)},)))
@@ -39,12 +39,12 @@ if instance_name:
     if len(security_groups) != 1:
         raise Exception('%d security groups found' % len(security_groups))
 
-    print 'Getting security group'
+    print('Getting security group')
 
     security_group = ec2.SecurityGroup(security_groups[0]['GroupId'])
 
 else:
-    print 'Getting security group'
+    print('Getting security group')
 
     security_groups = list(ec2.security_groups.filter(GroupNames=(security_group_name,)))
 
@@ -56,15 +56,15 @@ else:
     security_group = security_groups[0]
 
 if len(security_group.ip_permissions) > 0:
-    print 'Removing old permissions from security group'
+    print('Removing old permissions from security group')
 
     security_group.revoke_ingress(IpPermissions=security_group.ip_permissions)
 
-print 'Getting our public IP address'
+print('Getting our public IP address')
 
 ip = ipify.get_ip()
 
-print 'Authorizing connections from %s' % ip
+print('Authorizing connections from %s' % ip)
 
 security_group.authorize_ingress(IpProtocol='tcp', FromPort=3389, ToPort=3389, CidrIp='%s/32' % ip)
 
@@ -72,7 +72,7 @@ r53 = boto3.client('route53')
 
 if not host_name.endswith('.'): host_name = host_name + '.'
 
-print 'Looking for Route53 record for %s' % host_name
+print('Looking for Route53 record for %s' % host_name)
 
 zones = r53.list_hosted_zones()
 
@@ -86,19 +86,19 @@ for zone in zones['HostedZones']:
 if zone_id is None:
     raise Exception('No Route53 zone found for %s' % host_name)
 
-print 'Getting existing record\'s TTL'
+print('Getting existing record\'s TTL')
 
 ttl = r53.list_resource_record_sets(
         HostedZoneId=zone_id, StartRecordName=host_name, StartRecordType='A', MaxItems='1'
     )['ResourceRecordSets'][0]['TTL']
 
 if instance_name:
-    print 'Starting instance'
+    print('Starting instance')
 
     instance.start()
 
 else:
-    print 'Getting AMI'
+    print('Getting AMI')
 
     images = list(ec2.images.filter(Filters=({'Name': 'tag:Name', 'Values': (ami_name_tag,)},)))
 
@@ -107,7 +107,7 @@ else:
 
     image = images[0]
 
-    print 'Getting current spot prices'
+    print('Getting current spot prices')
 
     ec2client = boto3.client('ec2')
 
@@ -123,12 +123,12 @@ else:
 
     lowest_spot_price = min(spot_prices)
 
-    print 'Lowest current spot price: %s' % lowest_spot_price
+    print('Lowest current spot price: %s' % lowest_spot_price)
 
     if bid_price < lowest_spot_price:
         raise Exception('Bid price %s is too low' % bid_price)
 
-    print 'Requesting spot instance'
+    print('Requesting spot instance')
 
     spot_instance_response = ec2client.request_spot_instances(
         SpotPrice=str(bid_price),
@@ -142,7 +142,7 @@ else:
         spot_instance_response['SpotInstanceRequests'][0]['SpotInstanceRequestId']
 
     while spot_instance_response['SpotInstanceRequests'][0]['State'] == 'open':
-        print 'Waiting for spot instance request to be fulfilled'
+        print('Waiting for spot instance request to be fulfilled')
         time.sleep(5)
         spot_instance_response = ec2client.describe_spot_instance_requests(
             SpotInstanceRequestIds=(spot_instance_request_id,))
@@ -154,18 +154,18 @@ else:
 
     instance_id = request['InstanceId']
 
-    print 'Getting instance'
+    print('Getting instance')
 
     instance = next(iter(ec2.instances.filter(InstanceIds=(instance_id,))))
 
 while instance.state['Name'] != 'running':
-    print 'Waiting for instance to finish starting'
+    print('Waiting for instance to finish starting')
     time.sleep(5)
     instance.reload()
 
 instance_ip = instance.public_ip_address
 
-print 'Setting %s to point to %s with TTL %d' % (host_name, instance_ip, ttl)
+print('Setting %s to point to %s with TTL %d' % (host_name, instance_ip, ttl))
 
 response = r53.change_resource_record_sets(
     HostedZoneId = zone_id,
@@ -188,6 +188,6 @@ response = r53.change_resource_record_sets(
     })
 
 while response['ChangeInfo']['Status'] != 'INSYNC':
-    print 'Waiting for DNS update to propagate'
+    print('Waiting for DNS update to propagate')
     time.sleep(15)
     response = r53.get_change(Id=response['ChangeInfo']['Id'])
