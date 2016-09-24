@@ -1,13 +1,27 @@
 #!/usr/bin/env python3
 
+import argparse
 import decimal
 import datetime
 import enum
+import re
 import sys
 import time
 
 import boto3
 import ipify
+
+ec2 = boto3.resource('ec2')
+
+def get_ami(name_tag):
+    images = list(ec2.images.filter(Filters=({'Name': 'tag:Name', 'Values': (name_tag,)},)))
+
+    if len(images) != 1:
+        raise Exception('%d AMIs found' % len(images))
+
+    image = images[0]
+
+    return image
 
 def main():
     if len(sys.argv) == 3:
@@ -22,8 +36,6 @@ def main():
         raise Exception('At least instance and host name arguments are required')
 
     host_name = sys.argv[2]
-
-    ec2 = boto3.resource('ec2')
 
     class Platform(enum.Enum):
         linux = 'Linux'
@@ -62,12 +74,7 @@ def main():
     else:
         print('Getting AMI')
 
-        images = list(ec2.images.filter(Filters=({'Name': 'tag:Name', 'Values': (ami_name_tag,)},)))
-
-        if len(images) != 1:
-            raise Exception('%d AMIs found' % len(images))
-
-        image = images[0]
+        image = get_ami(ami_name_tag)
 
         platform = Platform.from_string(image.platform)
 
@@ -219,3 +226,80 @@ def main():
         print('Waiting for DNS update to propagate')
         time.sleep(15)
         response = r53.get_change(Id=response['ChangeInfo']['Id'])
+
+def reimage():
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('--delete-old', action='store_true', help="Delete the old AMI and its EBS snapshot after the new AMI is created")
+    arg_parser.add_argument('--terminate', action='store_true', help="Terminate the instance the new AMI is created from after creation finishes")
+    arg_parser.add_argument('ami_name_tag', metavar='ami-name-tag')
+    if len(sys.argv) == 1:
+        sys.argv.append('-h')
+    args = arg_parser.parse_args()
+
+    print('Getting AMI')
+
+    old_image = get_ami(args.ami_name_tag)
+
+    old_version_number = 1 # default
+
+    m = re.match('%s \((?P<version_number>[0-9])+\)' % re.escape(args.ami_name_tag), old_image.name)
+    if m:
+        try:
+            old_version_number = int(m.group('version_number'))
+        except ValueError:
+            pass
+
+    version_number = old_version_number + 1
+
+    print('Getting instance')
+
+    instances = list(ec2.instances.filter(Filters=(
+        {'Name': 'image-id', 'Values': (old_image.id,)},
+        {'Name': 'instance-state-name', 'Values': ('running', 'stopping', 'stopped')},
+    )))
+
+    if len(instances) != 1:
+        raise Exception('%d instances of that AMI found' % len(instances))
+
+    instance = instances[0]
+
+    ami_name = '%s (%d)' % (args.ami_name_tag, version_number)
+
+    print('Creating new AMI')
+
+    image = instance.create_image(Name=ami_name)
+
+    while image.state != 'available':
+        print("Waiting for new AMI to become available (it is currently %s)" % image.state)
+        time.sleep(5)
+        image.load()
+
+    def set_tag_name(resource, tag_name):
+        try:
+            resource.create_tags(Tags=({'Key': 'Name', 'Value': tag_name},))
+        except AttributeError:
+            pass # https://github.com/boto/boto3/issues/822
+
+    print("Setting new AMI's Name tag")
+
+    set_tag_name(image, args.ami_name_tag)
+
+    old_image_name_tag = '%s (Old)' % args.ami_name_tag
+
+    print("Setting old AMI's Name tag to: %s" % old_image_name_tag)
+
+    set_tag_name(old_image, old_image_name_tag)
+
+    if args.delete_old:
+        old_image_snapshot_id = old_image.block_device_mappings[0]['Ebs']['SnapshotId']
+
+        print("Deleting old AMI")
+        old_image.deregister()
+
+        print("Deleting old AMI's EBS Snapshot")
+        snapshot = ec2.Snapshot(old_image_snapshot_id)
+        snapshot.delete()
+
+    if args.terminate:
+        print("Terminating instance")
+        instance.terminate()
