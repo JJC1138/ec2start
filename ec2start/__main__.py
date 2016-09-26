@@ -14,7 +14,7 @@ import ipify
 ec2 = boto3.resource('ec2')
 
 def get_ami(name_tag):
-    images = list(ec2.images.filter(Filters=({'Name': 'tag:Name', 'Values': (name_tag,)},)))
+    images = list(ec2.images.filter(Filters=[{'Name': 'tag:Name', 'Values': [name_tag]}]))
 
     if len(images) != 1:
         raise Exception('%d AMIs found' % len(images))
@@ -53,7 +53,7 @@ def main():
         print('Getting instance')
 
         instances = list(ec2.instances.filter(
-            Filters=({'Name': 'tag:Name', 'Values': (instance_name,)},)))
+            Filters=[{'Name': 'tag:Name', 'Values': [instance_name]}]))
 
         if len(instances) != 1:
             raise Exception('%d instances with that name found' % len(instances))
@@ -80,7 +80,7 @@ def main():
 
         print('Getting security group')
 
-        security_groups = list(ec2.security_groups.filter(GroupNames=(security_group_name,)))
+        security_groups = list(ec2.security_groups.filter(GroupNames=[security_group_name]))
 
         if len(security_groups) != 1:
             # I believe it's possible to have more than one security group with the same name if they
@@ -147,8 +147,8 @@ def main():
         ec2client = boto3.client('ec2')
 
         response = ec2client.describe_spot_price_history(
-            InstanceTypes=(instance_type,),
-            ProductDescriptions=('Linux/UNIX' if platform == Platform.linux else 'Windows',),
+            InstanceTypes=[instance_type],
+            ProductDescriptions=['Linux/UNIX' if platform == Platform.linux else 'Windows'],
             StartTime=datetime.datetime.utcnow())
 
         spot_prices = [decimal.Decimal(i['SpotPrice']) for i in response['SpotPriceHistory']]
@@ -170,7 +170,7 @@ def main():
             LaunchSpecification = {
                 'ImageId': image.id,
                 'InstanceType': instance_type,
-                'SecurityGroupIds': (security_group.id,),
+                'SecurityGroupIds': [security_group.id],
             })
 
         spot_instance_request_id = \
@@ -180,7 +180,7 @@ def main():
             print('Waiting for spot instance request to be fulfilled')
             time.sleep(5)
             spot_instance_response = ec2client.describe_spot_instance_requests(
-                SpotInstanceRequestIds=(spot_instance_request_id,))
+                SpotInstanceRequestIds=[spot_instance_request_id])
 
         request = spot_instance_response['SpotInstanceRequests'][0]
 
@@ -191,7 +191,7 @@ def main():
 
         print('Getting instance')
 
-        instance = next(iter(ec2.instances.filter(InstanceIds=(instance_id,))))
+        instance = next(iter(ec2.instances.filter(InstanceIds=[instance_id])))
 
     while instance.state['Name'] != 'running':
         print('Waiting for instance to finish starting')
@@ -253,10 +253,10 @@ def reimage():
 
     print('Getting instance')
 
-    instances = list(ec2.instances.filter(Filters=(
-        {'Name': 'image-id', 'Values': (old_image.id,)},
-        {'Name': 'instance-state-name', 'Values': ('running', 'stopping', 'stopped')},
-    )))
+    instances = list(ec2.instances.filter(Filters=[
+        {'Name': 'image-id', 'Values': [old_image.id]},
+        {'Name': 'instance-state-name', 'Values': ['running', 'stopping', 'stopped']},
+    ]))
 
     if len(instances) != 1:
         raise Exception('%d instances of that AMI found' % len(instances))
@@ -275,10 +275,7 @@ def reimage():
         image.load()
 
     def set_tag_name(resource, tag_name):
-        try:
-            resource.create_tags(Tags=({'Key': 'Name', 'Value': tag_name},))
-        except AttributeError:
-            pass # https://github.com/boto/boto3/issues/822
+        resource.create_tags(Tags=[{'Key': 'Name', 'Value': tag_name}])
 
     print("Setting new AMI's Name tag")
 
