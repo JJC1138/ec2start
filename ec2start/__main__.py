@@ -155,7 +155,7 @@ def main():
 
         response = ec2client.describe_spot_price_history(
             InstanceTypes=[instance_type],
-            ProductDescriptions=['Linux/UNIX' if platform == Platform.linux else 'Windows'],
+            ProductDescriptions=['Linux/UNIX', 'Linux/UNIX (Amazon VPC)'] if platform == Platform.linux else ['Windows', 'Windows (Amazon VPC)'],
             StartTime=datetime.datetime.utcnow())
 
         spot_prices = [decimal.Decimal(i['SpotPrice']) for i in response['SpotPriceHistory']]
