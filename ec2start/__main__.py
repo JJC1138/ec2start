@@ -80,7 +80,8 @@ def main():
 
         print('Getting security group')
 
-        security_groups = list(ec2.security_groups.filter(GroupNames=[security_group_name]))
+        # There's a `GroupNames` parameter for this function, but that only works on EC2-Classic and the default VPC so we need to use this slightly more elaborate way of filtering by the group name:
+        security_groups = list(ec2.security_groups.filter(Filters=[{'Name': 'group-name', 'Values': [security_group_name]}]))
 
         if len(security_groups) != 1:
             # I believe it's possible to have more than one security group with the same name if they
