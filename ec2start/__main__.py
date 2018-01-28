@@ -158,16 +158,17 @@ def main():
             ProductDescriptions=['Linux/UNIX', 'Linux/UNIX (Amazon VPC)'] if platform == Platform.linux else ['Windows', 'Windows (Amazon VPC)'],
             StartTime=datetime.datetime.utcnow())
 
-        spot_prices = [decimal.Decimal(i['SpotPrice']) for i in response['SpotPriceHistory']]
+        # We need to remember which availability zone has the price we want so that we can include it in the launch specification, because EC2 assumes that launches without an availability zone or a subnet are intended for EC2-Classic, and then disallows the launch if EC2-Classic isn't supported:
+        spot_prices_and_availability_zones = [(decimal.Decimal(i['SpotPrice']), i['AvailabilityZone']) for i in response['SpotPriceHistory']]
 
-        if len(spot_prices) == 0:
+        if len(spot_prices_and_availability_zones) == 0:
             raise Exception('No spot prices found for instance type %s' % instance_type)
 
-        lowest_spot_price = min(spot_prices)
+        lowest_spot_price_and_availability_zone = min(spot_prices_and_availability_zones, key=lambda spot_price_and_availability_zone: spot_price_and_availability_zone[0])
 
-        print('Lowest current spot price: %s' % lowest_spot_price)
+        print('Lowest current spot price: %s' % lowest_spot_price_and_availability_zone[0])
 
-        if bid_price < lowest_spot_price:
+        if bid_price < lowest_spot_price_and_availability_zone[0]:
             raise Exception('Bid price %s is too low' % bid_price)
 
         print('Requesting spot instance')
@@ -178,6 +179,9 @@ def main():
                 'ImageId': image.id,
                 'InstanceType': instance_type,
                 'SecurityGroupIds': [security_group.id],
+                'Placement': {
+                    'AvailabilityZone': lowest_spot_price_and_availability_zone[1],
+                },
             })
 
         spot_instance_request_id = \
