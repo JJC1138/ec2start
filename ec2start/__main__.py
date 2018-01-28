@@ -171,6 +171,23 @@ def main():
         if bid_price < lowest_spot_price_and_availability_zone[0]:
             raise Exception('Bid price %s is too low' % bid_price)
 
+        print('Finding correct subnet for cheapest availability zone')
+
+        availability_zone = lowest_spot_price_and_availability_zone[1]
+
+        vpc = ec2.Vpc(security_group.vpc_id)
+
+        subnets = list(vpc.subnets.all())
+
+        subnet_in_availability_zone = None
+        for subnet in subnets:
+            if subnet.availability_zone == availability_zone:
+                subnet_in_availability_zone = subnet
+                break
+
+        if subnet_in_availability_zone is None:
+            raise Exception('Couldn\'t find a subnet in availability zone %s' % availability_zone)
+
         print('Requesting spot instance')
 
         spot_instance_response = ec2client.request_spot_instances(
@@ -180,8 +197,9 @@ def main():
                 'InstanceType': instance_type,
                 'SecurityGroupIds': [security_group.id],
                 'Placement': {
-                    'AvailabilityZone': lowest_spot_price_and_availability_zone[1],
+                    'AvailabilityZone': availability_zone,
                 },
+                'SubnetId': subnet_in_availability_zone.id,
             })
 
         spot_instance_request_id = \
